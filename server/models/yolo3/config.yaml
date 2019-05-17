@@ -1,0 +1,10 @@
+model_path:
+  'pretrained_model/default/yolo.h5'
+anchors_path:
+  'pretrained_model/default/yolo_anchors.txt'
+classes_path:
+  'pretrained_model/default/classes.txt'
+font_path:
+  'utils/font/FiraMono-Medium.otf'
+score_threshold:
+  0.3
