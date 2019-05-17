@@ -3,8 +3,8 @@ model_path:
 anchors_path:
   'pretrained_model/default/yolo_anchors.txt'
 classes_path:
-  'pretrained_model/default/classes.txt'
+  'pretrained_model/default/coco_classes.txt'
 font_path:
-  'utils/font/FiraMono-Medium.otf'
+  'font/FiraMono-Medium.otf'
 score_threshold:
   0.3

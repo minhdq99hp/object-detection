@@ -9,22 +9,6 @@ from sqlite3 import Error
 from datetime import datetime
 from PIL import Image
 
-# from models.faster_rcnn import FasterRCNN
-from models.yolov3 import Yolo3
-# from models.retinanet import Retinanet
-
-models = {
-    'yolo_v3': Yolo3,
-    # 'faster_rcnn': FasterRCNN
-    # 'retinanet': Retinanet
-}
-
-def get_model(model_name="yolo_v3"):
-    
-    try:
-        return models[model_name]()
-    except KeyError:
-        exit("Cannot find model {}. Available models are {}".format(model_name, list(models.keys())))
 
 def print_header(s):
     s = s.upper().strip()
@@ -37,20 +21,26 @@ def print_header(s):
         start_pos = len_header // 2 - len(s) // 2
         print(f'\n+{"-" * start_pos}{s}{"-" * (len_header-start_pos-len(s))}+\n')
 
+
 def cv2_to_pil(cv2_img):
     return Image.fromarray(cv2_img)
+
 
 def pil_to_cv2(pil_img):
     return np.asarray(pil_img)
 
+
 def has_video_extension(file_path):
     return file_path.lower().endswith(('.mp4', '.avi', '.h264'))
+
 
 def has_image_extension(file_path):
     return file_path.lower().endswith(('.png', '.jpg', '.jpeg'))
 
+
 def get_basename(file_path):
     return ntpath.basename(file_path)
+
 
 def interpret_name(filename="20190302134800708"):
     '''

@@ -1,11 +1,11 @@
 import sys
-# sys.path.append('/home/minhdq99hp/iot-camera')
-# sys.path.append('/home/minhdq99hp/iot-camera/minh_custom_keras_yolo3')
-
 import os
+from os.path import realpath, dirname
+sys.path.append(dirname(realpath(__file__)))
+
 import cv2
 
-import models.yolo3.YOLO_v3.Yolo3 as Yolo3
+from models.yolo3.YOLO_v3 import Yolo3
 import tensorflow as tf
 
 
@@ -15,8 +15,8 @@ from flask import Response, request, jsonify, render_template, send_from_directo
 from flask_bootstrap import Bootstrap
 from werkzeug.utils import secure_filename
 
-from api_utilities.util import print_header, pil_to_cv2, cv2_to_pil
-
+from utilities.util import *
+from utilities.frame_generator import FrameGenerator, StreamMode
 
 # CONSTANT
 processed_data_path = "database/processed_data"
@@ -31,62 +31,66 @@ app = flask.Flask(__name__)
 
 Bootstrap(app)
 
-def process(filename, output_type):
-    with graph.as_default():
-        # INPUT_PATH
-        input_path = os.path.join(uploaded_data_path, filename)
 
-        # OUTPUT_PATH
-        output_filename = f'{str(uuid.uuid4())}_{filename}'
-        output_path = os.path.join(processed_data_path, output_filename)
-
-        # OUTPUT_INFO
-        detection_info = {'frames': [],
-                          'time_interval': 0,
-                          'count_frames': 0,
-                          'output_path': output_path,
-                          'output_filename': output_filename}
+def generate_output_filepath(filepath):
+    return f'{processed_data_path}/{str(uuid.uuid4())}_{os.path.basename(filepath)}'
 
 
-        # process IMAGE
-        if filename.lower().endswith(('.png', '.jpg', '.jpeg')):
-            input_img = cv2.imread(input_path)
+def process(input_path):
+    # OUTPUT_PATH
+    output_path = generate_output_filepath(input_path)
 
-            detected, frame_info = yolo.detect_person_cv2(input_img)
+    print(f'OUTPUT_PATH: {output_path}')
 
-            cv2.imwrite(os.path.join(processed_data_path, output_filename), detected)
+    # OUTPUT_INFO
+    detection_info = {'frames': [],
+                      'time_interval': 0,
+                      'count_frames': 0,
+                      'output_path': output_path
+                      }
+
+    # PROCESS IMAGE
+    if has_image_extension(input_path):
+
+        print(f'INPUT_PATH: {input_path}')
+
+        input_img = cv2.imread(input_path)
+
+        detected, frame_info = yolo.predict_image(input_img)
+
+        cv2.imwrite(output_path, detected)
+
+        detection_info['frames'].append(frame_info)
+        detection_info['count_frames'] += 1
+        detection_info['time_interval'] += frame_info['time_interval']
+
+    # process VIDEO
+    elif has_video_extension(input_path):
+        # USING FRAME GENERATOR
+        frame_generator = FrameGenerator(StreamMode.VIDEO, input_path)
+
+        output_file = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'MJPG'),
+                                      frame_generator.vid_fps, frame_generator.vid_size)
+
+        for frame in frame_generator.yield_frame():
+            detected, frame_info = yolo.predict_image(frame)
+
+            if show_frame:
+                cv2.imshow('detected', detected)
+
+            output_file.write(detected)
 
             detection_info['frames'].append(frame_info)
-            detection_info['count_frames'] += 1
             detection_info['time_interval'] += frame_info['time_interval']
+            detection_info['count_frames'] += 1
 
-        # process VIDEO
-        elif filename.lower().endswith(('.mp4', '.avi')):
-            # USING FRAME GENERATOR
-            frame_generator = FrameGenerator(StreamMode.VIDEO, input_path)
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
 
-            output_file = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'MJPG'),
-                                          frame_generator.vid_fps, frame_generator.vid_size)
+        output_file.release()
+        cv2.destroyAllWindows()
 
-            for frame in frame_generator.yield_frame():
-                detected, frame_info = yolo.detect_person_cv2(frame)
-
-                if show_frame:
-                    cv2.imshow('detected', detected)
-
-                output_file.write(detected)
-
-                detection_info['frames'].append(frame_info)
-                detection_info['time_interval'] += frame_info['time_interval']
-                detection_info['count_frames'] += 1
-
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    break
-
-            output_file.release()
-            cv2.destroyAllWindows()
-
-        return detection_info
+    return detection_info
 
 # # detection_info (of a single frame):
 # time_interval
@@ -101,17 +105,6 @@ def process(filename, output_type):
 # time_interval
 # count_frames
 # frames
-
-
-# def yolo.detect_person_cv2(img):
-#     pil_im = cv2_to_pil(img)
-#
-#     with graph.as_default():
-#         detected, detection_info = yolo.detect_person_cv2(pil_im)
-#
-#     detected = pil_to_cv2(detected)
-#
-#     return detected, detection_info
 
 
 def load_models():
@@ -130,60 +123,34 @@ def clean_static_folder():
         os.system(f'rm {os.path.join(uploaded_data_path, "*")}')
 
 
-@app.route('/', methods=['GET'])
-def index():
-    return render_template("index.html")
+# @app.route('/', methods=['GET'])
+# def index():
+#     return render_template("index.html")
 
 
 @app.route('/upload_data', methods=['GET', 'POST'])
 def upload_data():
     if request.method == 'POST':
+        print(request)
+
         print_header('A NEW REQUEST COMING !')
         # GETTING DATA
         print_header('GETTING DATA')
-        f = request.files['file_input']
+        f = request.files['input_file']
         filename = secure_filename(f.filename)
-        output_type = request.form.get("output_type")
 
         # SAVE FILE TO LOCAL
         print_header('SAVE FILE TO LOCAL')
-        filepath = os.path.join(uploaded_data_path, filename)
+        filepath = realpath(os.path.join(uploaded_data_path, filename))
         f.save(filepath)
 
-        # process THE FILE
-        print_header('process FILE')
+        # PROCESS THE FILE
+        print_header('PROCESS FILE')
+        result = process(filepath)
 
-        # TODO: change this line using celery
-        # task = process.apply_async(args=[filename, output_type])
-        result = process(filename, output_type)
+        # output_file_path = os.path.join(processed_data_path, result['output_filename'])
 
-        output_file_path = os.path.join(processed_data_path, result['output_filename'])
-
-        if output_type == 'output_file':  # RETURN processED FILE
-            try:
-                print_header('RETURN processED FILE')
-                # return send_file(output_file_path, attachment_filename=result["output_filename"])
-                return send_from_directory(processed_data_path, result['output_filename'])
-            except Exception as e:
-                print(e)
-        elif output_type == 'output_json':  # RETURN JSON FILE
-            return jsonify(result)
-
-        else:  # RETURN HTML PAGE
-            print_header('OUTPUT_HTML')
-            if output_file_path.lower().endswith(('.png', '.jpg', '.jpeg')):
-                # return render_template('index.html',
-                #                        result_file=Markup(f'<img class="img-fuild" '
-                #                                           f'style="max-width:100%; height:auto;" '
-                #                                           f'src="{output_file_path}" alt="Result">'))
-                return redirect(output_file_path)
-            elif output_file_path.lower().endswith(('.mp4', '.avi')):
-                # return render_template('index.html',
-                #                        result_file=Markup(f'<video style="max-width:100%; height:auto;" controls>'
-                #                                           f'<source src="{output_file_path}" type="video/mp4">'
-                #                                           f'Sorry, your browser doesn\'t support embedded videos.'
-                #                                           f'</video>'))
-                return redirect(output_file_path)
+        return jsonify(result)
 
 
 # def process_webcam_streaming(frame_generator, streaming_id):
